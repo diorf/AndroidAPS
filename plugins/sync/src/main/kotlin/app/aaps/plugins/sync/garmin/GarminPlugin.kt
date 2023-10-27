@@ -94,6 +94,7 @@ class GarminPlugin @Inject constructor(
             server?.close()
             server = HttpServer(aapsLogger, port).apply {
                 registerEndpoint("/get", ::onGetBloodGlucose)
+                registerEndpoint("/sgv.json", ::onGetBloodGlucoseXdrip)
             }
         } else if (server != null) {
             aapsLogger.info(LTag.GARMIN, "stopping HTTP server")
@@ -180,6 +181,32 @@ class GarminPlugin @Inject constructor(
         val glucoseValues = getGlucoseValues(Duration.ofSeconds(waitSec))
         val jo = JsonObject()
         jo.addProperty("encodedGlucose", encodedGlucose(glucoseValues))
+        jo.addProperty("remainingInsulin", loopHub.insulinOnboard)
+        jo.addProperty("glucoseUnit", glucoseUnitStr)
+        loopHub.temporaryBasal.also {
+            if (!it.isNaN()) jo.addProperty("temporaryBasalRate", it)
+        }
+        jo.addProperty("profile", profileName.first().toString())
+        jo.addProperty("connected", loopHub.isConnected)
+        return jo.toString().also {
+            aapsLogger.info(LTag.GARMIN, "get from $caller resp , req: $uri, result: $it")
+        }
+    }
+
+    /** Responses to get glucose value request by the device.
+     *
+     * Also, gets the heart rate readings from the device.
+     */
+    @VisibleForTesting
+    @Suppress("UNUSED_PARAMETER")
+    fun onGetBloodGlucoseXdrip(caller: SocketAddress, uri: URI, requestBody: String?): CharSequence {
+        aapsLogger.info(LTag.GARMIN, "get from $caller resp , req: $uri")
+        receiveHeartRate(uri)
+        val profileName = loopHub.currentProfileName
+        val waitSec = getQueryParameter(uri, "wait", 0L)
+        val glucoseValues = getGlucoseValues(Duration.ofSeconds(waitSec))
+        val jo = JsonObject()
+        jo.addProperty("encodedGlucose", glucoseValues.toString())
         jo.addProperty("remainingInsulin", loopHub.insulinOnboard)
         jo.addProperty("glucoseUnit", glucoseUnitStr)
         loopHub.temporaryBasal.also {
